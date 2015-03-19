@@ -7,6 +7,9 @@ import subprocess
 import feedparser
 import hashlib
 import datetime
+import time
+import datetime as dt
+import calendar
 
 DBHOST = 'localhost'
 DBUSER = 'root'
@@ -54,8 +57,17 @@ def keyword_add(hackdb, target_id, keyword):
 	return;	
 
 def feed_add(hackdb, feed):
-	hackdb.execute("insert into sources (location, enabled) values(%s, %s)", (feed,1))
-	print "Number of Rows Updated: ", hackdb.rowcount
+	uid =  hashlib.md5(feed).hexdigest()
+	hackdb.execute("select source_id, location, enabled, HEX(uid) from sources where uid = UNHEX(%s)", [uid])
+	if hackdb.rowcount == 0:
+		hackdb.execute("insert into sources (location, enabled, uid) values(%s, %s, UNHEX(%s))", (feed,1, uid))
+		print "Number of Rows Updated: ", hackdb.rowcount
+	else:
+		print "Feed already exists!"
+		rows = hackdb.fetchall()
+		print "source_id location enabled uid"
+		for row in rows:
+			print row[0], row[1], row[2], row[3]
 	return;
 	
 def target_show(hackdb):
@@ -82,9 +94,9 @@ def feed_show(hackdb):
 	return;
 
 def hits_show(hackdb, target):
-	hackdb.execute("select target_name, hit_time, link from hits join targets on hits.target_id = targets.target_id join files on files.file_id = hits.file_id where (%s = -1 or hits.target_id = %s)", (target,target))
+	hackdb.execute("select published_date, target_name, link from hits join targets on hits.target_id = targets.target_id join files on files.file_id = hits.file_id where (%s = -1 or hits.target_id = %s) order by published_date desc, target_name asc", (target,target))
 	rows = hackdb.fetchall()
-	print "target_name hit_time link"
+	print "published_date target_name link"
 	for row in rows:
 		print row[0], row[1], row[2]
 	return;
@@ -103,27 +115,28 @@ def monitor(hackdb):
 		#parse through entries
 		for i in range(0,len(f.entries)):
         		
-			date = f.entries[i].published
+			struct = f.entries[i].published_parsed
+			timestamp = calendar.timegm(struct)
+			date = dt.datetime.utcfromtimestamp(timestamp)
         		uid = hashlib.md5(f.entries[i].link).hexdigest()
         		link = f.entries[i].link
-			data = ""
+			data = "<b>Date</b><br><br>"+str(date)+"\n\n"
+			if "\'summary\':" in str(f.entries[i]):
+				data = "<b>Summary:</b><br><br>\n\n"+data+f.entries[i].summary.encode('utf-8')			
+			if "\'summary_detail\':" in str(f.entries[i]):
+				data = data+"\n\n<br><br><b>Summary Detail:</b><br><br>\n\n"+f.entries[i].summary_detail.value.encode('utf-8')
 			if "\'content\':" in str(f.entries[i]):
 				for c in range(0,len(f.entries[i].content)):
-					data = data+f.entries[i].content[c].value 
-			if "\'summary_detail\':" in str(f.entries[i]):
-				data = data+f.entries[i].summary_detail.value
-			if "\'summary\':" in str(f.entries[i]):
-				data = data+f.entries[i].summary
+					data = data+"\n\n<br><br><b>Content:</b><br><br>\n\n"+f.entries[i].content[c].value.encode('utf-8')
 			
 			print "Checking Entry: " + link
 
 			#see whether entry matches base criteria
 			if is_hit(hackdb, -1, data):
 				print "\t--> Entry meets base criteria"
-				
 				if not file_exists(hackdb,uid):
 					#save matching entry	
-					fileid = save_file(hackdb, src[1], uid, link)
+					fileid = save_file(hackdb, src[1], uid, date, link, data)
 					#check individual targets
 					hackdb.execute("select target_id from targets")
 					targets = hackdb.fetchall()
@@ -143,9 +156,9 @@ def is_hit(hackdb, target_id, content):
                         hit = True
         return hit;
 
-def save_file(hackdb, source_id, uid, link):
+def save_file(hackdb, source_id, uid, date, link, data):
 	##insert the file
-	hackdb.execute("insert into files (source_id, uid, link) values(%s,UNHEX(%s),%s)",(source_id, uid, link))
+	hackdb.execute("insert into files (source_id, uid, published_date, link, file_data) values(%s,UNHEX(%s),%s,%s,%s)",(source_id, uid, date, link, data))
 	hackdb.execute("select file_id from files where uid = UNHEX(%s)", [uid])
 	fileid = hackdb.fetchone()
 	print "Saved File: "+"\n\t--> Source_ID: "+str(source_id)+"\n\t--> UID: "+str(uid)+"\n\t--> FileID: "+str(fileid[0])+"\n\t--> Link: "+str(link)
