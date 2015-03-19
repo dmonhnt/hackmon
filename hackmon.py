@@ -120,9 +120,9 @@ def monitor(hackdb):
 			date = dt.datetime.utcfromtimestamp(timestamp)
         		uid = hashlib.md5(f.entries[i].link).hexdigest()
         		link = f.entries[i].link
-			data = "<b>Date</b><br><br>"+str(date)+"\n\n"
+			data = "<b>Date</b><br><br>"+str(date)+"<br><br>\n\n"
 			if "\'summary\':" in str(f.entries[i]):
-				data = "<b>Summary:</b><br><br>\n\n"+data+f.entries[i].summary.encode('utf-8')			
+				data = data+"<b>Summary:</b><br><br>\n\n"+f.entries[i].summary.encode('utf-8')			
 			if "\'summary_detail\':" in str(f.entries[i]):
 				data = data+"\n\n<br><br><b>Summary Detail:</b><br><br>\n\n"+f.entries[i].summary_detail.value.encode('utf-8')
 			if "\'content\':" in str(f.entries[i]):
