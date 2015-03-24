@@ -94,7 +94,7 @@ def feed_show(hackdb):
 	return;
 
 def hits_show(hackdb, target):
-	hackdb.execute("select published_date, target_name, link from hits join targets on hits.target_id = targets.target_id join files on files.file_id = hits.file_id where (%s = -1 or hits.target_id = %s) order by published_date desc, target_name asc", (target,target))
+	hackdb.execute("select published_date, target_name, link from hits join targets on hits.target_id = targets.target_id join files on files.file_id = hits.file_id where (%s = -1 or hits.target_id = %s) and is_hit = 1 order by published_date desc, target_name asc", (target,target))
 	rows = hackdb.fetchall()
 	print "published_date target_name link"
 	for row in rows:
@@ -134,16 +134,21 @@ def monitor(hackdb):
 			#see whether entry matches base criteria
 			if is_hit(hackdb, -1, data):
 				print "\t--> Entry meets base criteria"
+
+				#save new files that meet base criteria
 				if not file_exists(hackdb,uid):
 					#save matching entry	
-					fileid = save_file(hackdb, src[1], uid, date, link, data)
-					#check individual targets
-					hackdb.execute("select target_id from targets")
-					targets = hackdb.fetchall()
-					for target in targets:
-						#identify target hits
-						if is_hit(hackdb,target[0],data):
-							hit_add(hackdb, target[0], src[1], fileid)
+					save_file(hackdb, src[1], uid, date, link, data)
+				
+				#check targets that have not been checked already
+				fileid = get_file(hackdb, uid)
+				hackdb.execute("select t.target_id from targets t left outer join hits h on t.target_id = h.target_id and h.file_id = %s where h.hit_id is null", [fileid])
+				targets = hackdb.fetchall()
+				for target in targets:
+					#identify target hits						
+					hit_check = is_hit(hackdb,target[0],data)
+					if hit_check: #only add good hits	
+						hit_add(hackdb, target[0], src[1], fileid, hit_check)
 	return;
 
 def is_hit(hackdb, target_id, content):
@@ -159,14 +164,18 @@ def is_hit(hackdb, target_id, content):
 def save_file(hackdb, source_id, uid, date, link, data):
 	##insert the file
 	hackdb.execute("insert into files (source_id, uid, published_date, link, file_data) values(%s,UNHEX(%s),%s,%s,%s)",(source_id, uid, date, link, data))
+	print "Saved File: "+"\n\t--> Source_ID: "+str(source_id)+"\n\t--> UID: "+str(uid)+"\n\t--> Link: "+str(link)
+	return;
+
+def get_file(hackdb, uid):
 	hackdb.execute("select file_id from files where uid = UNHEX(%s)", [uid])
 	fileid = hackdb.fetchone()
-	print "Saved File: "+"\n\t--> Source_ID: "+str(source_id)+"\n\t--> UID: "+str(uid)+"\n\t--> FileID: "+str(fileid[0])+"\n\t--> Link: "+str(link)
-	return fileid[0];
+	return fileid[0];	
 
-def hit_add(hackdb, target_id, source_id, file_id):
-	print "--> HIT! TargetID: "+str(target_id)+" SourceID: " + str(source_id) + " FileID: " + str(file_id)
-	hackdb.execute("insert into hits (target_id, source_id, file_id) values(%s, %s, %s)", (target_id, source_id, file_id))
+def hit_add(hackdb, target_id, source_id, file_id, is_hit):
+	if is_hit:
+		print "--> HIT! TargetID: "+str(target_id)+" SourceID: " + str(source_id) + " FileID: " + str(file_id)
+	hackdb.execute("insert into hits (target_id, source_id, file_id, is_hit) values(%s, %s, %s, %s)", (target_id, source_id, file_id, is_hit))
 	return;
 
 def file_exists(hackdb, uid):
